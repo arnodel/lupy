@@ -92,16 +92,19 @@ cdef void python2lua(clua.lua_State *L, object obj):
     Push a Lua version of the given Python object onto the stack.
     """
     cdef PythonData *data
-    if obj is None:
+    # Using type(obj) here to work around what seems to be a bug in the Cython
+    # implementation of isinstance() for objects whose class implements
+    # __getattribute__()
+    if type(obj) is Object and L == (<Object>obj)._L:
+        Object_pushtostack(<Object>obj)
+    elif obj is None:
         clua.lua_pushnil(L)
-    if isinstance(obj, int):
+    elif isinstance(obj, int):
         clua.lua_pushinteger(L, obj)
     elif isinstance(obj, float):
         clua.lua_pushnumber(L, obj)
     elif isinstance(obj, basestring):
         clua.lua_pushstring(L, obj)
-    elif isinstance(obj, Object):
-        obj.pushtostack()
     else:
         new_PythonData(L, obj, not isinstance(obj, (list, tuple, dict)))
 
@@ -267,13 +270,6 @@ cdef class Object:
     def __init__(self):
         raise TypeError("This class cannot be instanciated from Python")
 
-    cdef create(self, clua.lua_State *L):
-        self._L = L
-        self._ref = clua.luaL_ref(L, clua.LUA_REGISTRYINDEX) 
-
-    cdef pushtostack(self):
-        clua.lua_rawgeti(self._L, clua.LUA_REGISTRYINDEX, self._ref)
-
     def __dealloc__(self):
         clua.luaL_unref(self._L, clua.LUA_REGISTRYINDEX, self._ref)
     
@@ -281,83 +277,70 @@ cdef class Object:
         return "<Lua Object %s>" % self
 
     def __len__(self):
-        self.pushtostack()
+        Object_pushtostack(self)
         clua.lua_len(self._L, -1)
         return lua2python_pop(self._L)
 
-    cdef compare(self, other, int op):
-        cdef int result
-        self.pushtostack()
-        python2lua(self._L, other)
-        result = clua.lua_compare(self._L, -2, -1, op)
-        clua.lua_pop(self._L, 2)
-        return bool(result)
-    
     def __richcmp__(self, other, int richop):
         if richop == 0:
-            return self.compare(other, clua.LUA_LT)
+            return Object_compare(self, other, clua.LUA_OPLT)
         elif richop == 1:
-            return self.compare(other, clua.LUA_LE)
+            return Object_compare(self, other, clua.LUA_OPLE)
         elif richop == 2:
-            return self.compare(other, clua.LUA_EQ)
+            return Object_compare(self, other, clua.LUA_OPEQ)
         elif richop == 3:
-            return not self.compare(other, clua.LUA_EQ)
+            return not Object_compare(self, other, clua.LUA_OPEQ)
         elif richop == 4:
-            return not self.compare(other, clua.LUA_LE)
+            return not Object_compare(self, other, clua.LUA_OPLE)
         elif richop == 5:
-            return not self.compare(other, clua.LUA_LT)
+            return not Object_compare(self, other, clua.LUA_OPLT)
 
-    cdef arith2(self, other, int op):
-        self.pushtostack()
-        python2lua(self._L, other)
-        clua.lua_arith(self._L, op)
-        return lua2python_pop(self._L)
-
+    
     def __add__(self, other):
-        return self.arith2(other, clua.LUA_OPADD)
+        return Object_arith2(self, other, clua.LUA_OPADD)
 
     def __sub__(self, other):
-        return self.arith2(other, clua.LUA_OPSUB)
+        return Object_arith2(self, other, clua.LUA_OPSUB)
 
     def __mul__(self, other):
-        return self.arith2(other, clua.LUA_OPMUL)
+        return Object_arith2(self, other, clua.LUA_OPMUL)
 
     def __div__(self, other):
-        return self.arith2(other, clua.LUA_OPDIV)
+        return Object_arith2(self, other, clua.LUA_OPDIV)
 
     def __mod__(self, other):
-        return self.arith2(other, clua.LUA_OPMOD)
+        return Object_arith2(self, other, clua.LUA_OPMOD)
 
     def __pow__(self, other, mod):
         if mod is not None:
             raise TypeError("Lua power does not support third argument")
-        return self.arith2(other, clua.LUA_OPPOW)
+        return Object_arith2(self, other, clua.LUA_OPPOW)
 
     def __neg__(self):
-        self.pushtostack()
+        Object_pushtostack(self)
         clua.lua_arith(self._L, clua.LUA_OPUNM)
         return lua2python_pop(self._L)
 
     def __str__(self):
         clua.lua_getglobal(self._L, "tostring")
-        self.pushtostack()
+        Object_pushtostack(self)
         check_status(self._L, clua.lua_pcall(self._L, 1, 1, 0))
         return lua2python_pop(self._L)
 
     def __getitem__(self, key):
-        self.pushtostack()
+        Object_pushtostack(self)
         python2lua(self._L, key)
         clua.lua_gettable(self._L, -2)
         return lua2python_pop(self._L)
 
     def __setitem__(self, key, val):
-        self.pushtostack()
+        Object_pushtostack(self)
         python2lua(self._L, key)
         python2lua(self._L, val)
         clua.lua_settable(self._L, -3)
     
     def __call__(self, *args):
-        self.pushtostack()
+        Object_pushtostack(self)
         for arg in args:
             python2lua(self._L, arg)
         check_status(self._L, clua.lua_pcall(self._L, len(args), 1, 0))
@@ -370,9 +353,30 @@ cdef class Object:
         self[name] = value
 
 
+cdef void Object_pushtostack(Object obj):
+    clua.lua_rawgeti(obj._L, clua.LUA_REGISTRYINDEX, obj._ref)
+
+
+cdef object Object_compare(Object obj1, object obj2, int op):
+    cdef int result
+    Object_pushtostack(obj1)
+    python2lua(obj1._L, obj2)
+    result = clua.lua_compare(obj1._L, -2, -1, op)
+    clua.lua_pop(obj1._L, 2)
+    return bool(result)
+
+
+cdef object Object_arith2(Object obj1, object obj2, int op):
+    Object_pushtostack(obj1)
+    python2lua(obj1._L, obj2)
+    clua.lua_arith(obj1._L, op)
+    return lua2python_pop(obj1._L)
+
+
 cdef Object new_Object(clua.lua_State *L):
     cdef Object instance = Object.__new__(Object)
-    instance.create(L)
+    instance._L = L
+    instance._ref = clua.luaL_ref(L, clua.LUA_REGISTRYINDEX) 
     return instance
 
 
@@ -434,7 +438,7 @@ cdef int python_eval(clua.lua_State *L):
     return 1
 
 
-cdef add_cfunction(clua.lua_State *L, char *name, clua.lua_CFunction fn):
+cdef void add_cfunction(clua.lua_State *L, char *name, clua.lua_CFunction fn):
     clua.lua_pushstring(L, name)
     clua.lua_pushcfunction(L, fn)
     clua.lua_rawset(L, -3)
@@ -502,7 +506,7 @@ cdef class State:
         check_status(self._L, clua.lua_pcall(self._L, 0, 1, 0))
         return lua2python_pop(self._L)
 
-    property globals:
+    property env:
 
         """The global space of Lua"""
 
