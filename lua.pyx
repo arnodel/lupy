@@ -17,7 +17,7 @@ cdef void new_PythonData(clua.lua_State *L, object obj, int attrindex):
     data.pyobj = <cpython.PyObject *>obj
     data.attrindex = attrindex
     cpython.Py_INCREF(obj)
-    clua.luaL_setmetatable(L, "Python")
+    clua.luaL_setmetatable(L, "lupy_Python")
 
 
 cdef PythonData *check_PythonData(clua.lua_State *L, int index):
@@ -25,7 +25,7 @@ cdef PythonData *check_PythonData(clua.lua_State *L, int index):
     Return a pointer to the PythonData referred to at the given index on the
     stack, or NULL if there is none such.
     """
-    return <PythonData *>clua.luaL_testudata(L, index, "Python")
+    return <PythonData *>clua.luaL_testudata(L, index, "lupy_Python")
 
 
 class LuaError(Exception):
@@ -266,6 +266,9 @@ cdef int py__gc(clua.lua_State *L):
 cdef class Object:
     cdef int _ref
     cdef clua.lua_State *_L
+    # I'm not using this at the moment, but it is useful for refcounting and
+    # it may come handy in the future
+    cdef object _state
 
     def __init__(self):
         raise TypeError("This class cannot be instanciated from Python")
@@ -377,6 +380,9 @@ cdef Object new_Object(clua.lua_State *L):
     cdef Object instance = Object.__new__(Object)
     instance._L = L
     instance._ref = clua.luaL_ref(L, clua.LUA_REGISTRYINDEX) 
+    clua.lua_pushstring(L, "lupy_python_state")
+    clua.lua_rawget(L, clua.LUA_REGISTRYINDEX)
+    instance._state = <object>clua.lua_touserdata(L, -1)
     return instance
 
 
@@ -453,7 +459,7 @@ cdef class State:
         clua.luaL_openlibs(L)
 
         # Create the metatable for python objects
-        clua.luaL_newmetatable(L, "Python")
+        clua.luaL_newmetatable(L, "lupy_Python")
         add_cfunction(L, "__gc", py__gc)
         add_cfunction(L, "__tostring", py__tostring)
         add_cfunction(L, "__index", py__index)
@@ -473,7 +479,12 @@ cdef class State:
         add_cfunction(L, "attrs", python_attrs)
         add_cfunction(L, "exec", python_exec)
         add_cfunction(L, "eval", python_eval)
-        clua.lua_setglobal(L, "python")
+        clua.lua_setglobal(L, "lupy_Python")
+
+        # Add a reference to self in the registry index
+        clua.lua_pushstring(L, "lupy_python_state")
+        clua.lua_pushlightuserdata(L, <void *>self)
+        clua.lua_rawset(L, clua.LUA_REGISTRYINDEX)
 
     def __dealloc__(self):
         if self._L != NULL:

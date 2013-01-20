@@ -59,6 +59,7 @@ cdef extern from "lua.h":
     void lua_pushnumber (lua_State *L, lua_Number n)
     void lua_pushvalue (lua_State *L, int index)
     void lua_pushnil (lua_State *L)
+    void lua_pushlightuserdata (lua_State *L, void *p)
 
     void lua_setglobal (lua_State *L, const_char_ptr name)
     void lua_getglobal (lua_State *L, const_char_ptr name)
@@ -79,6 +80,7 @@ cdef extern from "lua.h":
     void lua_settable (lua_State *L, int index)
     void lua_rawgeti (lua_State *L, int index, int n)
     void lua_rawseti (lua_State *L, int index, int n)
+    void lua_rawget (lua_State *L, int index)
     void lua_rawset (lua_State *L, int index)
     
     void lua_len (lua_State *L, int index)
