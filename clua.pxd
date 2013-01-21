@@ -84,6 +84,7 @@ cdef extern from "lua.h":
     void lua_rawset (lua_State *L, int index)
     
     void lua_len (lua_State *L, int index)
+    int lua_next (lua_State *L, int index)
 
     int lua_pcall (lua_State *L, int nargs, int nresults, int msgh)
     void lua_pushcfunction (lua_State *L, lua_CFunction f)

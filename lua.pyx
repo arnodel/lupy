@@ -1,6 +1,7 @@
 cimport clua
 cimport cpython
 
+
 # Lua wrapper for Python objects
 ctypedef struct PythonData:
     cpython.PyObject *pyobj
@@ -341,7 +342,16 @@ cdef class Object:
         python2lua(self._L, key)
         python2lua(self._L, val)
         clua.lua_settable(self._L, -3)
-    
+
+    def __iter__(self):
+        Object_pushtostack(self)
+        clua.lua_pushnil(self._L)
+        while clua.lua_next(self._L, -2):
+            key = lua2python(self._L, -2)
+            val = lua2python_pop(self._L)
+            yield key, val
+        clua.lua_pop(self._L, 2)
+
     def __call__(self, *args):
         Object_pushtostack(self)
         for arg in args:
