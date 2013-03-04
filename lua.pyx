@@ -92,12 +92,13 @@ cdef void python2lua(clua.lua_State *L, object obj):
     """
     Push a Lua version of the given Python object onto the stack.
     """
-    cdef PythonData *data
     # Using type(obj) here to work around what seems to be a bug in the Cython
     # implementation of isinstance() for objects whose class implements
     # __getattribute__()
-    if type(obj) is Object and L == (<Object>obj)._L:
+    if type(obj) is Object:
         Object_pushtostack(<Object>obj)
+        if L is not (<Object>obj)._L:
+            clua.lua_xmove((<Object>obj)._L, L, 1)
     elif obj is None:
         clua.lua_pushnil(L)
     elif isinstance(obj, int):
@@ -108,6 +109,28 @@ cdef void python2lua(clua.lua_State *L, object obj):
         clua.lua_pushstring(L, obj)
     else:
         new_PythonData(L, obj, not isinstance(obj, (list, tuple, dict)))
+
+
+cdef void python2lua_rec(clua.lua_State *L, object obj):
+    cdef int t
+    cdef int i
+    if type(obj) is Object:
+        python2lua(L, obj)
+    elif isinstance(obj, (list, tuple)):
+        clua.lua_createtable(L, <int>len(obj), 0)
+        t = clua.lua_gettop(L)
+        for i, x in enumerate(obj, 1):
+            python2lua_rec(L, x)
+            clua.lua_rawseti(L, t, i)
+    elif isinstance(obj, dict):
+        clua.lua_createtable(L, 0, <int>len(obj))
+        t = clua.lua_gettop(L)
+        for k, v in obj.iteritems():
+            python2lua_rec(L, k)
+            python2lua_rec(L, v)
+            clua.lua_rawset(L, t)
+    else:
+        python2lua(L, obj)
 
 
 #
@@ -281,9 +304,12 @@ cdef class Object:
         return "<Lua Object %s>" % self
 
     def __len__(self):
+        cdef int len
         Object_pushtostack(self)
         clua.lua_len(self._L, -1)
-        return lua2python_pop(self._L)
+        len = lua2python(self._L, -1)
+        clua.lua_pop(self._L, 2)
+        return len
 
     def __richcmp__(self, other, int richop):
         if richop == 0:
@@ -335,22 +361,29 @@ cdef class Object:
         Object_pushtostack(self)
         python2lua(self._L, key)
         clua.lua_gettable(self._L, -2)
-        return lua2python_pop(self._L)
+        val = lua2python_pop(self._L)
+        clua.lua_pop(self._L, 1)
+        return val
 
     def __setitem__(self, key, val):
         Object_pushtostack(self)
         python2lua(self._L, key)
         python2lua(self._L, val)
         clua.lua_settable(self._L, -3)
+        clua.lua_pop(self._L, 1)
 
     def __iter__(self):
+        # We need a new thread because we can't leave stuff on the main stack
+        cdef clua.lua_State *S = clua.lua_newthread(self._L)
+        s = new_Object(self._L)
         Object_pushtostack(self)
-        clua.lua_pushnil(self._L)
-        while clua.lua_next(self._L, -2):
-            key = lua2python(self._L, -2)
-            val = lua2python_pop(self._L)
-            yield key, val
-        clua.lua_pop(self._L, 2)
+        clua.lua_xmove(self._L, S, 1)
+        cdef int i
+        for i in range(1, len(self) + 1):
+            clua.lua_pushinteger(S, i)
+            clua.lua_gettable(S, -2)
+            yield lua2python_pop(S)
+        clua.lua_pop(S, 1)
 
     def __call__(self, *args):
         Object_pushtostack(self)
@@ -364,6 +397,67 @@ cdef class Object:
 
     def __setattr__(self, name, value):
         self[name] = value
+
+
+def pairs(Object obj):
+    # We need a new thread because we can't leave stuff on the main stack
+    cdef clua.lua_State *S = clua.lua_newthread(obj._L)
+    s = new_Object(obj._L)
+    Object_pushtostack(obj)
+    clua.lua_xmove(obj._L, S, 1)
+    clua.lua_pushnil(S)
+    while clua.lua_next(S, -2):
+        key = lua2python(S, -2)
+        val = lua2python_pop(S)
+        yield key, val
+    clua.lua_pop(S, 1)
+
+
+def keys(Object obj):
+    # We need a new thread because we can't leave stuff on the main stack
+    cdef clua.lua_State *S = clua.lua_newthread(obj._L)
+    s = new_Object(obj._L)
+    Object_pushtostack(obj)
+    clua.lua_xmove(obj._L, S, 1)
+    clua.lua_pushnil(S)
+    while clua.lua_next(S, -2):
+        # Pop the value
+        clua.lua_pop(S, 1)
+        yield lua2python(S, -1)
+    clua.lua_pop(S, 1)
+
+
+def typename(Object obj):
+    cdef int tp
+    Object_pushtostack(obj)
+    tp = clua.lua_type(obj._L, -1)
+    clua.lua_pop(obj._L, 1)
+    return clua.lua_typename(obj._L, tp)
+
+
+def islist(Object obj):
+    if typename(obj) != 'table':
+        return False
+    l = len(obj)
+    for k in keys(obj):
+        if not (1 <= k <= l):
+            return False
+    return True
+
+
+def isdict(Object obj):
+    return typename(obj) == 'table'
+
+
+def topython(obj):
+    if not isinstance(obj, Object):
+        return obj
+    if islist(obj):
+        return map(topython, obj)
+    elif isdict(obj):
+        return dict((k, topython(v)) for k, v in pairs(obj))
+    else:
+        return obj
 
 
 cdef void Object_pushtostack(Object obj):
@@ -393,6 +487,7 @@ cdef Object new_Object(clua.lua_State *L):
     clua.lua_pushstring(L, "lupy_python_state")
     clua.lua_rawget(L, clua.LUA_REGISTRYINDEX)
     instance._state = <object>clua.lua_touserdata(L, -1)
+    clua.lua_pop(L, 1)
     return instance
 
 
@@ -462,6 +557,7 @@ cdef void add_cfunction(clua.lua_State *L, char *name, clua.lua_CFunction fn):
 
 cdef class State:
     cdef clua.lua_State *_L
+    cdef object _env
 
     def __cinit__(self):
         cdef clua.lua_State *L = clua.luaL_newstate()
@@ -482,6 +578,7 @@ cdef class State:
         add_cfunction(L, "__mod", py__mod)
         add_cfunction(L, "__pow", py__pow)
         add_cfunction(L, "__unm", py__unm)
+        clua.lua_pop(L, 1)
 
         # Create the python table
         clua.lua_newtable(L)
@@ -489,32 +586,20 @@ cdef class State:
         add_cfunction(L, "attrs", python_attrs)
         add_cfunction(L, "exec", python_exec)
         add_cfunction(L, "eval", python_eval)
-        clua.lua_setglobal(L, "lupy_Python")
+        clua.lua_setglobal(L, "python")
 
         # Add a reference to self in the registry index
         clua.lua_pushstring(L, "lupy_python_state")
         clua.lua_pushlightuserdata(L, <void *>self)
         clua.lua_rawset(L, clua.LUA_REGISTRYINDEX)
 
+        # The global environment
+        clua.lua_pushglobaltable(self._L)
+        self._env = new_Object(self._L)
+
     def __dealloc__(self):
         if self._L != NULL:
             clua.lua_close(self._L)
-
-    cdef pushsequence(self, seq):
-        cdef int i
-        clua.lua_createtable(self._L, <int>len(seq), 0)
-        cdef int t = clua.lua_gettop(self._L)
-        for i, x in enumerate(seq, 1):
-            self.python2lua(x)
-            clua.lua_rawseti(self._L, t, i)
-
-    cdef pushmap(self, map):
-        clua.lua_createtable(self._L, 0, <int>len(map))
-        cdef int t = clua.lua_gettop(self._L)
-        for k, v in map.iteritems():
-            self.python2lua(k)
-            self.python2lua(v)
-            clua.lua_rawset(self._L, t)
 
     def run(self, char *s):
         check_status(self._L, clua.luaL_dostring(self._L, s))
@@ -527,10 +612,16 @@ cdef class State:
         check_status(self._L, clua.lua_pcall(self._L, 0, 1, 0))
         return lua2python_pop(self._L)
 
+    def stacksize(self):
+        return clua.lua_gettop(self._L)
+
+    def tolua(self, obj):
+        python2lua_rec(self._L, obj)
+        return new_Object(self._L)
+
     property env:
 
         """The global space of Lua"""
 
         def __get__(self):
-            clua.lua_pushglobaltable(self._L)
-            return new_Object(self._L)
+            return self._env

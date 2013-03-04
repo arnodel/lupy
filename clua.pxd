@@ -1,7 +1,9 @@
 from libc.stddef cimport ptrdiff_t
 
+
 cdef extern from *:
     ctypedef char* const_char_ptr "const char*"
+
 
 cdef extern from "lua.h":
     ctypedef struct lua_State:
@@ -66,6 +68,7 @@ cdef extern from "lua.h":
     void lua_pushglobaltable(lua_State *L)
 
     int lua_type (lua_State *L, int index)
+    const_char_ptr lua_typename (lua_State *L, int tp)
 
     lua_Number lua_tonumber (lua_State *L, int index)
     const_char_ptr lua_tostring (lua_State *L, int index)
@@ -94,6 +97,11 @@ cdef extern from "lua.h":
     void lua_arith (lua_State *L, int op)
 
     int lua_error (lua_State *L)
+
+    lua_State *lua_newthread (lua_State *L)
+    int lua_resume (lua_State *L, lua_State *from_, int nargs)
+    int lua_yieldk (lua_State *L, int nresults, int ctx, lua_CFunction k)
+    void lua_xmove (lua_State *from_, lua_State *to, int n)
 
 
 cdef extern from "lauxlib.h":
