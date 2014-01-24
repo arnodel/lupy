@@ -2,6 +2,18 @@ cimport clua
 cimport cpython
 
 
+_typename = {
+    clua.LUA_TNIL: 'nil',
+    clua.LUA_TBOOLEAN: 'boolean',
+    clua.LUA_TLIGHTUSERDATA: 'lightuserdata',
+    clua.LUA_TNUMBER: 'number',
+    clua.LUA_TTABLE: 'table',
+    clua.LUA_TFUNCTION: 'function',
+    clua.LUA_TUSERDATA: 'userdata',
+    clua.LUA_TTHREAD: 'thread'
+}
+
+
 # Lua wrapper for Python objects
 ctypedef struct PythonData:
     cpython.PyObject *pyobj
@@ -101,6 +113,8 @@ cdef void python2lua(clua.lua_State *L, object obj):
             clua.lua_xmove((<Object>obj)._L, L, 1)
     elif obj is None:
         clua.lua_pushnil(L)
+    elif isinstance(obj, bool):
+        clua.lua_pushboolean(L, obj)
     elif isinstance(obj, int):
         clua.lua_pushinteger(L, obj)
     elif isinstance(obj, float):

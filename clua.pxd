@@ -56,6 +56,7 @@ cdef extern from "lua.h":
 
     int lua_gettop (lua_State *L)
     void lua_pop(lua_State *L, int n)
+    void lua_pushboolean(lua_State *L, int b)
     void lua_pushinteger (lua_State *L, lua_Integer n)
     const_char_ptr lua_pushstring (lua_State *L, const_char_ptr s)
     void lua_pushnumber (lua_State *L, lua_Number n)
