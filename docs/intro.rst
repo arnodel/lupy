@@ -58,6 +58,8 @@ Lupy is implemented using Cython (http://http://cython.org/).  Cython 0.17 or la
 
 It requires Lua 5.2 (http://www.lua.org/download.html) and will not work with Lua 5.1 or earlier as a few parts of the Lua API have made some backward-incompatible changes in 5.2 (it wouldn't be too difficult to make it work for 5.1 but it is not something I have needed so far)
 
+The source code for Lupy can be obtained from https://code.google.com/p/lupy/ .
+
 In order to build Lupy, just do::
 
     $ cd /path/to/lupy
