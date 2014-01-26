@@ -297,6 +297,76 @@ cdef int py__gc(clua.lua_State *L):
     cpython.Py_DECREF(obj)
     return 0
 
+
+cdef int py__len(clua.lua_State *L):
+    obj = unwrap_data(L, 1)
+    try:
+        result = len(obj)
+    except Exception, e:
+        return except2error(L, e)
+    python2lua(L, result)
+    return 1
+
+
+cdef int py__eq(clua.lua_State *L):
+    obj = unwrap_data(L, 1)
+    other = lua2python(L, 2)
+    try:
+        result = obj == other
+    except Exception, e:
+        return except2error(L, e)
+    python2lua(L, result)
+    return 1
+
+    
+cdef int py__lt(clua.lua_State *L):
+    obj = unwrap_data(L, 1)
+    other = lua2python(L, 2)
+    try:
+        result = obj < other
+    except Exception, e:
+        return except2error(L, e)
+    python2lua(L, result)
+    return 1
+
+
+cdef int py__le(clua.lua_State *L):
+    obj = unwrap_data(L, 1)
+    other = lua2python(L, 2)
+    try:
+        result = obj <= other
+    except Exception, e:
+        return except2error(L, e)
+    python2lua(L, result)
+    return 1
+
+
+cdef int ipairs_f(clua.lua_State *L):
+    it = lua2python(L, 1)
+    val = lua2python(L, 2)
+    try:
+        next = it.next()
+    except StopIteration:
+        return 0
+    except Exception, e:
+        return except2error(L, e)
+    python2lua(L, val + 1)
+    python2lua(L, next)
+    return 2
+
+
+cdef int py__ipairs(clua.lua_State *L):
+    obj = unwrap_data(L, 1)
+    try:
+        it = iter(obj)
+    except Exception, e:
+        return except2error(L, e)
+    clua.lua_pushcfunction(L, ipairs_f)
+    python2lua(L, it)
+    python2lua(L, 0)
+    return 3
+
+
 #
 # Lua object wrapper for Python
 #
@@ -592,6 +662,13 @@ cdef class State:
         add_cfunction(L, "__mod", py__mod)
         add_cfunction(L, "__pow", py__pow)
         add_cfunction(L, "__unm", py__unm)
+        add_cfunction(L, "__len", py__len)
+        add_cfunction(L, "__eq", py__eq)
+        add_cfunction(L, "__lt", py__lt)
+        add_cfunction(L, "__le", py__le)
+
+        add_cfunction(L, "__ipairs", py__ipairs)
+
         clua.lua_pop(L, 1)
 
         # Create the python table
